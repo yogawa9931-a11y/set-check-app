@@ -21,6 +21,24 @@
     #completeBtn:disabled { background: #ccc; color: #888; }
     #resetBtn { background: #eee; color: #333; }
     #setTitle { font-size: 16px; font-weight: bold; }
+
+    /* 確認モーダル */
+    #confirmOverlay {
+      display: none;
+      position: fixed; inset: 0;
+      background: rgba(0,0,0,0.5);
+      align-items: center; justify-content: center;
+      z-index: 100;
+    }
+    #confirmBox {
+      background: #fff; border-radius: 10px; padding: 20px; width: 85%; max-width: 340px;
+      text-align: center;
+    }
+    #confirmBox .confirm-label { font-size: 13px; color: #888; }
+    #confirmBox .confirm-name { font-size: 20px; font-weight: bold; margin: 8px 0; }
+    #confirmBox .confirm-count { font-size: 14px; color: #555; margin-bottom: 12px; }
+    #confirmYes { background: #1a7f37; color: #fff; }
+    #confirmNo { background: #eee; color: #333; }
   </style>
 </head>
 <body>
@@ -35,12 +53,24 @@
     <button id="resetBtn" onclick="resetSet()">この読み取りをやめて最初から</button>
   </div>
 
+  <!-- 商品確認モーダル -->
+  <div id="confirmOverlay">
+    <div id="confirmBox">
+      <div class="confirm-label">この商品でよろしいですか?</div>
+      <div class="confirm-name" id="confirmName"></div>
+      <div class="confirm-count" id="confirmCount"></div>
+      <button id="confirmYes" onclick="confirmScan()">確定して+1</button>
+      <button id="confirmNo" onclick="cancelScan()">キャンセル(読み取り直す)</button>
+    </div>
+  </div>
+
   <script>
     // ↓↓↓ ここをGASの「デプロイ」で発行された /exec URL に書き換えてください ↓↓↓
   const GAS_URL = "https://script.google.com/macros/s/AKfycbyC3-jFE_Mxg2blx2tQW4NBWXIoRXdkmxuVTiHem24IGggjLKfc3iDvbqMk9a3vgmtB/exec";
 
     let currentSet = null;
-    let scanning = 'set';
+    let scanning = 'set'; // 'set' | 'item' | 'confirming'
+    let pendingItem = null;
 
     const html5QrCode = new Html5Qrcode("reader");
     const config = { fps: 10, qrbox: 220 };
@@ -56,17 +86,9 @@
       });
     }
 
-    let lastCode = null;
-    let lastScanTime = 0;
-    const SCAN_COOLDOWN_MS = 1500; // 同じコードはこの時間内は再カウントしない
-
     function onScanSuccess(decodedText) {
-      const now = Date.now();
-      if (decodedText === lastCode && (now - lastScanTime) < SCAN_COOLDOWN_MS) {
-        return; // 同じバーコードの連続検知を無視
-      }
-      lastCode = decodedText;
-      lastScanTime = now;
+      // 確認待ち中は新しい読み取りを無視(カメラは一時停止しているが念のため)
+      if (scanning === 'confirming') return;
 
       if (scanning === 'set') {
         handleSetScan(decodedText);
@@ -98,7 +120,6 @@
         items: res.items.map(it => ({ ...it, scanned: 0 }))
       };
       scanning = 'item';
-      lastCode = null;
       document.getElementById('setCard').style.display = 'block';
       document.getElementById('setTitle').textContent = res.setName + '(' + res.setId + ')';
       renderItems();
@@ -115,9 +136,37 @@
         setStatus(item.name + ' はすでに必要数に達しています');
         return;
       }
-      item.scanned += 1;
-      setStatus(item.name + ' ' + item.scanned + '/' + item.required);
-      renderItems();
+
+      // ここで即カウントせず、確認モーダルを出す。カメラは一時停止。
+      pendingItem = item;
+      scanning = 'confirming';
+      html5QrCode.pause(true);
+
+      document.getElementById('confirmName').textContent = item.name;
+      document.getElementById('confirmCount').textContent =
+        '現在 ' + item.scanned + '/' + item.required + ' → 確定で ' + (item.scanned + 1) + '/' + item.required;
+      document.getElementById('confirmOverlay').style.display = 'flex';
+    }
+
+    function confirmScan() {
+      if (pendingItem) {
+        pendingItem.scanned += 1;
+        setStatus(pendingItem.name + ' ' + pendingItem.scanned + '/' + pendingItem.required + ' を記録しました');
+        renderItems();
+      }
+      closeConfirm();
+    }
+
+    function cancelScan() {
+      setStatus('取り消しました。もう一度スキャンしてください');
+      closeConfirm();
+    }
+
+    function closeConfirm() {
+      pendingItem = null;
+      scanning = 'item';
+      document.getElementById('confirmOverlay').style.display = 'none';
+      html5QrCode.resume();
     }
 
     function renderItems() {
@@ -157,7 +206,8 @@
     function resetSet() {
       currentSet = null;
       scanning = 'set';
-      lastCode = null;
+      pendingItem = null;
+      document.getElementById('confirmOverlay').style.display = 'none';
       document.getElementById('setCard').style.display = 'none';
       setStatus('セットのバーコード/QRをスキャンしてください');
     }
