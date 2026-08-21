@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+  <style>
+    body { font-family: sans-serif; margin: 0; padding: 12px; background: #f5f5f5; }
+    h2 { font-size: 18px; margin: 8px 0; }
+    #reader { width: 100%; max-width: 400px; margin: 0 auto; }
+    .card { background: #fff; border-radius: 8px; padding: 12px; margin-top: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.15); }
+    .item-row { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid #eee; }
+    .item-row:last-child { border-bottom: none; }
+    .item-name { font-size: 15px; }
+    .item-count { font-size: 15px; font-weight: bold; }
+    .item-row.done { color: #1a7f37; }
+    .item-row.done .item-count::after { content: " ✓"; }
+    #status { font-size: 14px; color: #555; min-height: 20px; margin-top: 6px; }
+    button { width: 100%; padding: 12px; font-size: 16px; border: none; border-radius: 6px; margin-top: 10px; }
+    #completeBtn { background: #1a7f37; color: #fff; }
+    #completeBtn:disabled { background: #ccc; color: #888; }
+    #resetBtn { background: #eee; color: #333; }
+    #setTitle { font-size: 16px; font-weight: bold; }
+  </style>
+</head>
+<body>
+  <h2>商品セット消込</h2>
+  <div id="reader"></div>
+  <div id="status">セットのバーコード/QRをスキャンしてください</div>
+
+  <div class="card" id="setCard" style="display:none;">
+    <div id="setTitle"></div>
+    <div id="itemList"></div>
+    <button id="completeBtn" disabled onclick="completeSet()">消込完了として記録</button>
+    <button id="resetBtn" onclick="resetSet()">この読み取りをやめて最初から</button>
+  </div>
+
+  <script>
+    // ↓↓↓ ここをGASの「デプロイ」で発行された /exec URL に書き換えてください ↓↓↓
+    const GAS_URL = "https://script.google.com/macros/s/xxxxxxxxxxxxxxxxxxxx/exec";
+
+    let currentSet = null;
+    let scanning = 'set';
+
+    const html5QrCode = new Html5Qrcode("reader");
+    const config = { fps: 10, qrbox: 220 };
+
+    function startScanner() {
+      html5QrCode.start(
+        { facingMode: "environment" },
+        config,
+        onScanSuccess,
+        () => {}
+      ).catch(err => {
+        setStatus('カメラを起動できませんでした: ' + err);
+      });
+    }
+
+    function onScanSuccess(decodedText) {
+      if (scanning === 'set') {
+        handleSetScan(decodedText);
+      } else {
+        handleItemScan(decodedText);
+      }
+    }
+
+    function handleSetScan(code) {
+      setStatus('照合中...');
+      fetch(GAS_URL + '?action=lookupSet&code=' + encodeURIComponent(code))
+        .then(res => res.json())
+        .then(onSetLookupResult)
+        .catch(err => setStatus('通信エラー: ' + err));
+    }
+
+    function onSetLookupResult(res) {
+      if (res.error) {
+        setStatus('エラー: ' + res.error);
+        return;
+      }
+      if (!res.found) {
+        setStatus('該当するセットが見つかりません。もう一度スキャンしてください。');
+        return;
+      }
+      currentSet = {
+        setId: res.setId,
+        setName: res.setName,
+        items: res.items.map(it => ({ ...it, scanned: 0 }))
+      };
+      scanning = 'item';
+      document.getElementById('setCard').style.display = 'block';
+      document.getElementById('setTitle').textContent = res.setName + '(' + res.setId + ')';
+      renderItems();
+      setStatus('構成品を1点ずつスキャンしてください');
+    }
+
+    function handleItemScan(code) {
+      const item = currentSet.items.find(it => it.code === String(code).trim());
+      if (!item) {
+        setStatus('このセットの構成品ではありません: ' + code);
+        return;
+      }
+      if (item.scanned >= item.required) {
+        setStatus(item.name + ' はすでに必要数に達しています');
+        return;
+      }
+      item.scanned += 1;
+      setStatus(item.name + ' ' + item.scanned + '/' + item.required);
+      renderItems();
+    }
+
+    function renderItems() {
+      const list = document.getElementById('itemList');
+      list.innerHTML = '';
+      let allDone = true;
+      currentSet.items.forEach(it => {
+        const done = it.scanned >= it.required;
+        if (!done) allDone = false;
+        const row = document.createElement('div');
+        row.className = 'item-row' + (done ? ' done' : '');
+        row.innerHTML = '<span class="item-name">' + it.name + '</span>' +
+                         '<span class="item-count">' + it.scanned + '/' + it.required + '</span>';
+        list.appendChild(row);
+      });
+      document.getElementById('completeBtn').disabled = !allDone;
+    }
+
+    function completeSet() {
+      const detail = currentSet.items.map(it => it.name + ' ' + it.scanned + '/' + it.required).join(', ');
+      const params = new URLSearchParams({
+        action: 'logCompletion',
+        setId: currentSet.setId,
+        setName: currentSet.setName,
+        result: '完了',
+        detail: detail
+      });
+      fetch(GAS_URL + '?' + params.toString())
+        .then(res => res.json())
+        .then(() => {
+          setStatus('記録しました。次のセットのバーコードをスキャンしてください');
+          resetSet();
+        })
+        .catch(err => setStatus('記録エラー: ' + err));
+    }
+
+    function resetSet() {
+      currentSet = null;
+      scanning = 'set';
+      document.getElementById('setCard').style.display = 'none';
+      setStatus('セットのバーコード/QRをスキャンしてください');
+    }
+
+    function setStatus(msg) {
+      document.getElementById('status').textContent = msg;
+    }
+
+    startScanner();
+  </script>
+</body>
+</html>
