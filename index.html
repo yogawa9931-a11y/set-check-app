@@ -37,7 +37,7 @@
 
   <script>
     // ↓↓↓ ここをGASの「デプロイ」で発行された /exec URL に書き換えてください ↓↓↓
-    const GAS_URL = "https://script.google.com/macros/s/AKfycbyC3-jFE_Mxg2blx2tQW4NBWXIoRXdkmxuVTiHem24IGggjLKfc3iDvbqMk9a3vgmtB/exec";
+  const GAS_URL = "https://script.google.com/macros/s/AKfycbyC3-jFE_Mxg2blx2tQW4NBWXIoRXdkmxuVTiHem24IGggjLKfc3iDvbqMk9a3vgmtB/exec";
 
     let currentSet = null;
     let scanning = 'set';
@@ -56,7 +56,18 @@
       });
     }
 
+    let lastCode = null;
+    let lastScanTime = 0;
+    const SCAN_COOLDOWN_MS = 1500; // 同じコードはこの時間内は再カウントしない
+
     function onScanSuccess(decodedText) {
+      const now = Date.now();
+      if (decodedText === lastCode && (now - lastScanTime) < SCAN_COOLDOWN_MS) {
+        return; // 同じバーコードの連続検知を無視
+      }
+      lastCode = decodedText;
+      lastScanTime = now;
+
       if (scanning === 'set') {
         handleSetScan(decodedText);
       } else {
@@ -87,6 +98,7 @@
         items: res.items.map(it => ({ ...it, scanned: 0 }))
       };
       scanning = 'item';
+      lastCode = null;
       document.getElementById('setCard').style.display = 'block';
       document.getElementById('setTitle').textContent = res.setName + '(' + res.setId + ')';
       renderItems();
@@ -145,6 +157,7 @@
     function resetSet() {
       currentSet = null;
       scanning = 'set';
+      lastCode = null;
       document.getElementById('setCard').style.display = 'none';
       setStatus('セットのバーコード/QRをスキャンしてください');
     }
