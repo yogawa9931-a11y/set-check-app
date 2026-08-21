@@ -37,7 +37,7 @@
 
   <script>
     // ↓↓↓ ここをGASの「デプロイ」で発行された /exec URL に書き換えてください ↓↓↓
-    const GAS_URL = "https://script.google.com/macros/s/xxxxxxxxxxxxxxxxxxxx/exec";
+    const GAS_URL = "https://script.google.com/macros/s/AKfycbyC3-jFE_Mxg2blx2tQW4NBWXIoRXdkmxuVTiHem24IGggjLKfc3iDvbqMk9a3vgmtB/exec";
 
     let currentSet = null;
     let scanning = 'set';
