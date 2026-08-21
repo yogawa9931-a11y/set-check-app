@@ -137,10 +137,10 @@
         return;
       }
 
-      // ここで即カウントせず、確認モーダルを出す。カメラは一時停止。
+      // ここで即カウントせず、確認モーダルを出す。(pause/resumeは機種によって
+      // 正しく動かないことがあるため、カメラは止めずに確認中フラグだけで制御する)
       pendingItem = item;
       scanning = 'confirming';
-      html5QrCode.pause(true);
 
       document.getElementById('confirmName').textContent = item.name;
       document.getElementById('confirmCount').textContent =
@@ -166,7 +166,6 @@
       pendingItem = null;
       scanning = 'item';
       document.getElementById('confirmOverlay').style.display = 'none';
-      html5QrCode.resume();
     }
 
     function renderItems() {
